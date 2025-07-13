@@ -35,13 +35,7 @@ npm run generate-cert
 ### 3. サーバーの起動
 
 ```bash
-npm start
-```
-
-または開発モード（自動リロード機能付き）で起動：
-
-```bash
-npm run dev
+node server.js
 ```
 
 サーバーは `https://0.0.0.0:3000` で起動します。
