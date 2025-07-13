@@ -112,6 +112,7 @@
         let availableGltfFiles = []; // 利用可能なGLTFファイルのリスト
         let lastSpawnTime = 0; // 最後にスポーンした時刻
         let spawnInterval = 3000; // スポーン間隔（ミリ秒）
+        let spawnCount = 0; // スポーン回数をカウント
 
         const HAND_JOINTS = [
             'wrist',
@@ -189,7 +190,7 @@
                     // 右から左へ移動（X軸のマイナス方向）
                     this.group.position.x -= this.speed;
                 } else {
-                    // 奥から手前へ移動（Z軸のプラス方向）
+                    // 後ろから前へ移動（Z軸のプラス方向）
                     this.group.position.z += this.speed;
                 }
 
@@ -207,8 +208,7 @@
                 const targetPos = new THREE.Vector3();
                 this.collisionMesh.getWorldPosition(targetPos);
 
-                // 手または頭部との距離をチェック
-                const headDist = headMesh.position.distanceTo(targetPos);
+                // 手との距離をチェック（頭部との衝突は無視）
                 let leftHandDist = 999;
                 let rightHandDist = 999;
 
@@ -220,7 +220,8 @@
                 }
 
                 const threshold = 0.5;
-                if (headDist < threshold || leftHandDist < threshold || rightHandDist < threshold) {
+                // 手との衝突のみをチェック（頭部との衝突は除外）
+                if (leftHandDist < threshold || rightHandDist < threshold) {
                     this.hit = true;
                 }
             }
@@ -301,6 +302,43 @@
             headMesh = new THREE.Mesh(headGeometry, headMaterial);
             scene.add(headMesh);
 
+
+            // VRモードボタンの設定
+            document.getElementById('startButton').addEventListener('click', async () => {
+                try {
+                    // WebXRのサポートチェック
+                    if (!navigator.xr) {
+                        throw new Error('WebXRがサポートされていません');
+                    }
+
+                    // immersive-vrセッションのサポートチェック
+                    const isVRSupported = await navigator.xr.isSessionSupported('immersive-vr');
+                    if (!isVRSupported) {
+                        throw new Error('VRセッションがサポートされていません');
+                    }
+
+                    // VRセッションを開始（ハンドトラッキング機能を要求）
+                    const session = await navigator.xr.requestSession('immersive-vr', {
+                        requiredFeatures: ['hand-tracking'],
+                        optionalFeatures: ['local-floor', 'bounded-floor']
+                    });
+
+                    // セッションをレンダラーに設定
+                    await renderer.xr.setSession(session);
+
+                    // ボタンを非表示
+                    document.getElementById('startButton').style.display = 'none';
+                    document.getElementById('nonVRButton').style.display = 'none';
+                    
+                    isVRMode = true;
+
+                } catch (error) {
+                    console.error('VRセッションの開始に失敗:', error);
+                    document.getElementById('errorMessage').textContent = 
+                        `VRエラー: ${error.message}`;
+                    document.getElementById('errorMessage').style.display = 'block';
+                }
+            });
 
             // 非VRモードボタンの設定
             document.getElementById('nonVRButton').addEventListener('click', () => {
@@ -513,9 +551,10 @@
                 const currentTime = Date.now();
                 if (currentTime - lastSpawnTime > spawnInterval && availableGltfFiles.length > 0) {
                     // front.gltfとside.gltfを交互にスポーン
-                    const type = (Math.floor((currentTime - lastSpawnTime) / spawnInterval) % 2 === 0) ? 'front' : 'side';
+                    const type = (spawnCount % 2 === 0) ? 'front' : 'side';
                     spawnTestTarget(type);
                     lastSpawnTime = currentTime;
+                    spawnCount++;
                 }
 
                 // プレイヤーの位置を取得（VRモードではカメラ位置、非VRモードでは固定位置）
@@ -537,7 +576,7 @@
             renderer.render(scene, camera);
         }
 
-        // GLTFモデルをロード - simple_gltf.htmlと同じアプローチ
+        // GLTFモデルをロード
         function loadGLTFModels() {
             const gltfFiles = ['front.gltf', 'side.gltf'];
             console.log('Loading GLTF files:', gltfFiles);
@@ -575,13 +614,15 @@
 
                 // 位置設定
                 if (type === 'side') {
-                    // 真右から（プレイヤーの右側から）
-                    target.group.position.set(8, 1.6, 0);
+                    // 真右から（プレイヤーの真横から）
+                    target.group.position.set(8, 1.2, camera.position.z);
                     // Y軸方向に90度回転（左向きに）
                     target.group.rotation.y = Math.PI / 2;
                 } else {
-                    // 奥から（プレイヤーの正面奥から）
-                    target.group.position.set(0, 1.6, -10); 
+                    // VRモードでは手前から、非VRモードでは後ろから
+                    const startZ = isVRMode ? camera.position.z - 8 : -10;
+                    target.group.position.set(0, 1.2, startZ); 
+                    // 回転なし（正面を向いたまま）
                 }
                 console.log(`Spawned: ${filename} at`, target.group.position);
             } else {
@@ -600,7 +641,6 @@
         window.gltfModels = gltfModels;
         window.targets = targets;
         window.scene = scene;
-
 
         // 初期化と開始
         init();
