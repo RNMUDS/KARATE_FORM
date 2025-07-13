@@ -94,6 +94,35 @@
             font-size: 16px;
         }
         
+        #fileUpload {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 5px;
+            z-index: 100;
+        }
+        
+        #fileUpload button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        
+        #fileUpload button:hover {
+            background: #45a049;
+        }
+        
+        #fileInput {
+            display: none;
+        }
+        
         #controls {
             position: absolute;
             bottom: 20px;
@@ -126,8 +155,13 @@
     <div id="info">GLTF Viewer</div>
     <div id="errorMessage"></div>
     
+    <div id="fileUpload">
+        <input type="file" id="fileInput" accept=".gltf,.glb">
+        <button id="uploadButton">GLTFファイルを選択</button>
+    </div>
+    
     <div id="fileSelector">
-        <label>GLTFファイル:</label>
+        <label>既存のGLTFファイル:</label>
         <select id="gltfSelect">
             <option value="">ファイルを選択してください</option>
         </select>
@@ -154,10 +188,10 @@
         let gltfFiles = [];
         let currentIndex = 0;
 
-        // publicディレクトリ内のGLTFファイルリスト（手動で追加）
+        // publicディレクトリ内のGLTFファイルリスト
         const availableGltfFiles = [
-            'human-silhouette.gltf',
-            'human-cutout-board.gltf'
+            'front.gltf',
+            'side.gltf'
             // 他のGLTFファイルがある場合はここに追加
         ];
 
@@ -211,6 +245,21 @@
 
             // ファイルセレクターの初期化
             initFileSelector();
+            
+            // ファイルアップロードボタンの設定
+            document.getElementById('uploadButton').addEventListener('click', () => {
+                document.getElementById('fileInput').click();
+            });
+            
+            // ファイル選択時の処理
+            document.getElementById('fileInput').addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file && (file.name.endsWith('.gltf') || file.name.endsWith('.glb'))) {
+                    loadLocalFile(file);
+                } else if (file) {
+                    showError('GLTFまたはGLBファイルを選択してください');
+                }
+            });
 
             // VRボタンの設定
             document.getElementById('startButton').addEventListener('click', async () => {
@@ -226,6 +275,7 @@
                             document.getElementById('startButton').style.display = 'none';
                             document.getElementById('nonVRButton').style.display = 'none';
                             document.getElementById('fileSelector').style.display = 'none';
+                            document.getElementById('fileUpload').style.display = 'none';
                             document.getElementById('controls').style.display = 'none';
                         } else {
                             showError('VRがサポートされていません。');
@@ -313,6 +363,38 @@
             });
         }
 
+        function loadLocalFile(file) {
+            // 既存のモデルを削除
+            if (currentModel) {
+                scene.remove(currentModel);
+                if (mixer) {
+                    mixer = null;
+                }
+            }
+
+            document.getElementById('info').textContent = `読み込み中: ${file.name}`;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const arrayBuffer = e.target.result;
+                const loader = new THREE.GLTFLoader();
+                
+                loader.parse(
+                    arrayBuffer,
+                    '',
+                    function (gltf) {
+                        handleLoadedModel(gltf, file.name);
+                    },
+                    function (error) {
+                        console.error('An error happened', error);
+                        showError(`${file.name}の読み込みに失敗しました: ${error}`);
+                    }
+                );
+            };
+            
+            reader.readAsArrayBuffer(file);
+        }
+
         function loadGLTF(filename) {
             // 既存のモデルを削除
             if (currentModel) {
@@ -329,34 +411,7 @@
             loader.load(
                 filename,
                 function (gltf) {
-                    currentModel = gltf.scene;
-                    
-                    // モデルのサイズと位置調整
-                    currentModel.scale.set(1, 1, 1);
-                    currentModel.position.set(0, 0, 0);
-                    
-                    // 影の設定
-                    currentModel.traverse((child) => {
-                        if (child.isMesh) {
-                            child.castShadow = true;
-                            child.receiveShadow = true;
-                        }
-                    });
-                    
-                    scene.add(currentModel);
-                    
-                    // アニメーションがある場合
-                    if (gltf.animations && gltf.animations.length > 0) {
-                        mixer = new THREE.AnimationMixer(currentModel);
-                        gltf.animations.forEach((clip) => {
-                            mixer.clipAction(clip).play();
-                        });
-                    }
-                    
-                    // カメラ位置を調整
-                    resetCameraView();
-                    
-                    document.getElementById('info').textContent = `GLTF Viewer - ${filename}`;
+                    handleLoadedModel(gltf, filename);
                 },
                 // 読み込み進捗
                 function (xhr) {
@@ -369,6 +424,37 @@
                     showError(`${filename}の読み込みに失敗しました: ${error}`);
                 }
             );
+        }
+
+        function handleLoadedModel(gltf, filename) {
+            currentModel = gltf.scene;
+            
+            // モデルのサイズと位置調整
+            currentModel.scale.set(1, 1, 1);
+            currentModel.position.set(0, 0, 0);
+            
+            // 影の設定
+            currentModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+            });
+            
+            scene.add(currentModel);
+            
+            // アニメーションがある場合
+            if (gltf.animations && gltf.animations.length > 0) {
+                mixer = new THREE.AnimationMixer(currentModel);
+                gltf.animations.forEach((clip) => {
+                    mixer.clipAction(clip).play();
+                });
+            }
+            
+            // カメラ位置を調整
+            resetCameraView();
+            
+            document.getElementById('info').textContent = `GLTF Viewer - ${filename}`;
         }
 
         function resetCameraView() {
