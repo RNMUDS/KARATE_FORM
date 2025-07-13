@@ -110,6 +110,8 @@
         let gltfLoader;
         let gltfModels = {}; // GLTFモデルを保存
         let availableGltfFiles = []; // 利用可能なGLTFファイルのリスト
+        let lastSpawnTime = 0; // 最後にスポーンした時刻
+        let spawnInterval = 3000; // スポーン間隔（ミリ秒）
 
         const HAND_JOINTS = [
             'wrist',
@@ -123,10 +125,12 @@
 
         // ターゲットクラス
         class Target {
-            constructor(gltfModel = null) {
+            constructor(gltfModel = null, type = 'front') {
                 this.group = new THREE.Group();
                 this.gltfModel = gltfModel;
                 this.hit = false;
+                this.type = type;
+                this.speed = 0.05; // 移動速度を上げて突き抜けるアニメーションを強調
 
                 if (gltfModel) {
                     // GLTFモデルを使用
@@ -174,6 +178,26 @@
                     });
                     this.collisionMesh = new THREE.Mesh(collisionGeometry, collisionMaterial);
                     this.group.add(this.collisionMesh);
+                }
+            }
+
+            update(playerPosition) {
+                if (this.hit) return;
+
+                // タイプに応じて移動方向を決定
+                if (this.type === 'side') {
+                    // 右から左へ移動（X軸のマイナス方向）
+                    this.group.position.x -= this.speed;
+                } else {
+                    // 奥から手前へ移動（Z軸のプラス方向）
+                    this.group.position.z += this.speed;
+                }
+
+                // 画面外に出たかチェック
+                if (this.type === 'side' && this.group.position.x < -10) {
+                    this.hit = true; // 削除フラグを立てる
+                } else if (this.type === 'front' && this.group.position.z > 10) {
+                    this.hit = true; // 削除フラグを立てる
                 }
             }
 
@@ -485,21 +509,29 @@
 
             // ゲームロジック（VRモードと非VRモード共通）
             if (isVRMode || (!isVRMode && !renderer.xr.isPresenting)) {
-                // ランダムスポーンを廃止（手動でのみスポーン可能）
-
-                // ターゲットの更新（VRモードのみ）
-                if (isVRMode) {
-                    for (let i = targets.length - 1; i >= 0; i--) {
-                        targets[i].checkMatch();
-
-                        // ヒットしたターゲットを削除
-                        if (targets[i].hit) {
-                            scene.remove(targets[i].group);
-                            targets.splice(i, 1);
-                        }
-                    }
+                // 自動スポーン
+                const currentTime = Date.now();
+                if (currentTime - lastSpawnTime > spawnInterval && availableGltfFiles.length > 0) {
+                    // front.gltfとside.gltfを交互にスポーン
+                    const type = (Math.floor((currentTime - lastSpawnTime) / spawnInterval) % 2 === 0) ? 'front' : 'side';
+                    spawnTestTarget(type);
+                    lastSpawnTime = currentTime;
                 }
 
+                // プレイヤーの位置を取得（VRモードではカメラ位置、非VRモードでは固定位置）
+                const playerPosition = isVRMode ? camera.position : new THREE.Vector3(0, 1.6, 0);
+
+                // ターゲットの更新
+                for (let i = targets.length - 1; i >= 0; i--) {
+                    targets[i].update(playerPosition);
+                    targets[i].checkMatch();
+
+                    // ヒットしたターゲットを削除
+                    if (targets[i].hit) {
+                        scene.remove(targets[i].group);
+                        targets.splice(i, 1);
+                    }
+                }
             }
 
             renderer.render(scene, camera);
@@ -537,15 +569,19 @@
         function spawnTestTarget(type = 'front') {
             const filename = type + '.gltf';
             if (gltfModels[filename]) {
-                const target = new Target(gltfModels[filename]);
+                const target = new Target(gltfModels[filename], type);
                 scene.add(target.group);
                 targets.push(target);
 
                 // 位置設定
                 if (type === 'side') {
-                    target.group.position.set(0, 1.6, 0);  // 横から
+                    // 真右から（プレイヤーの右側から）
+                    target.group.position.set(8, 1.6, 0);
+                    // Y軸方向に90度回転（左向きに）
+                    target.group.rotation.y = Math.PI / 2;
                 } else {
-                    target.group.position.set(0, 1.6, -5); // 前から
+                    // 奥から（プレイヤーの正面奥から）
+                    target.group.position.set(0, 1.6, -10); 
                 }
                 console.log(`Spawned: ${filename} at`, target.group.position);
             } else {
